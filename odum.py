@@ -3,36 +3,78 @@
 
 from ipywidgets import interact, interactive, fixed, interact_manual
 import ipywidgets as widgets
-import * from dvkey
+from dvkey import *
+from IPython.display import display
+import pandas as pd
+from sklearn import model_selection
+from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.naive_bayes import GaussianNB
+from sklearn.svm import SVC
+import requests
 
 class DataVerseML(object):   
     def __init__(self, verbose=0):
         if verbose > 0:
             print("DataverseML Loaded...")
-        
-        #w = interactive()
-        
-        
-        import pandas as pd
-        from sklearn import model_selection
-        from sklearn.metrics import classification_report
-        from sklearn.metrics import confusion_matrix
-        from sklearn.metrics import accuracy_score
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.tree import DecisionTreeClassifier
-        from sklearn.neighbors import KNeighborsClassifier
-        from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-        from sklearn.naive_bayes import GaussianNB
-        from sklearn.svm import SVC
-        import requests
-        
+               
         ####### TEMPORARY #######
         global API_KEY
         self.api_key = API_KEY 
         self.url = "https://dataverse.unc.edu/"
+        self.w_dv_id()
         #########################
+
+    def w_dv_id(self):  
+        print("Type in DataVerse ID below:")
+        interact_id_update=interact.options(manual=True,manual_name="Get datasets!")
         
+        @interact_id_update
+        def w_dv_id_update(dv_id="odumtest"):
+            import requests
+            import json
+
+            dv_query = self.url+"/api/dataverses/"+dv_id+"/contents?key="+self.api_key
+            headers = {'X-Dataverse-key': self.api_key}
+            
+            result = requests.get(dv_query,headers=headers)
+            json_output = json.loads(result.text)
+            if json_output['status'] != "OK":
+                print("ERROR Occured! Please try again!")
+            else:
+                doi = []
+                for data in json_output['data']:
+                    doi.append(data['authority'])
+                    
+                self.w_dv_dataset(dv_id,doi)
+                    
+    def w_dv_dataset(self, dv_id, doi):
+        print("==============")
+        print("Select DOI number")
+        interact_id_update=interact.options(manual=True,manual_name="Get Files!")
         
+        @interact_id_update
+        def w_dv_dataset_update(doinum = doi):
+            import requests
+            import json
+            
+            dv_query = self.url+"/api/dataverses/"+dv_id+"/?persistentId=doi:"+doinum+"&key="+self.api_key
+            headers = {'X-Dataverse-key': self.api_key}
+              
+            
+            result = requests.get(dv_query,headers=headers)
+            json_output = json.loads(result.text)
+            
+            if json_output['status'] != "OK":
+                print("ERROR Occured! Please try again!")
+            else:
+                print(json_output)
+    
     def set_url(self,url):
         self.url = url
         
@@ -44,10 +86,4 @@ class DataVerseML(object):
         
     def get_api_key(self):
         return self.api_key
-    
-    def f(self, x):
-        return x
-
-    
-    
-    
+        
