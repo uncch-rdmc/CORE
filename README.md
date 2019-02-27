@@ -1,0 +1,2 @@
+# CORE
+Odum Core Project
