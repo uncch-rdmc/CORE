@@ -1,0 +1,7 @@
+pandas>=0.24.1
+sklearn
+requests>=2.21.0
+jupyter
+jupyterlab>=0.35
+ipywidgets>=7.4
+
