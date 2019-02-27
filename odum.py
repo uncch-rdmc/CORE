@@ -4,7 +4,7 @@
 from ipywidgets import interact, interactive, fixed, interact_manual
 import ipywidgets as widgets
 from dvkey import *
-from IPython.display import display
+from IPython.display import display, HTML
 import pandas as pd
 from sklearn import model_selection
 from sklearn.metrics import classification_report
@@ -21,15 +21,28 @@ import requests
 class DataVerseML(object):   
     def __init__(self, verbose=0):
         if verbose > 0:
-            print("DataverseML Loaded...")
-               
-        ####### TEMPORARY #######
-        global API_KEY
-        self.api_key = API_KEY 
-        self.url = "https://dataverse.unc.edu/"
-        self.w_dv_id()
-        #########################
+            print("DataverseML Module Loaded...")
+            
+        try:
+            from dvkey import API_KEY     
+            from dvurl import URL
+            global API_KEY
+            global URL
+            self.api_key = API_KEY
+            self.url = URL
+            self.w_dv_id()
+        except ImportError:
+            self.w_dv_key_url()
 
+    def w_dv_key_url(self):
+        interact_id_update=interact.options(manual=True,manual_name="Set key and url")
+        
+        @interact_id_update
+        def w_dv_key_url_update(url="",api_key=""):
+            self.url = url
+            self.api_key = api_key
+            self.w_dv_id()
+        
     def w_dv_id(self):  
         print("Type in DataVerse ID below:")
         interact_id_update=interact.options(manual=True,manual_name="Get datasets!")
@@ -49,8 +62,8 @@ class DataVerseML(object):
             else:
                 doi = []
                 for data in json_output['data']:
-                    doi.append(data['authority'])
-                    
+                    doi.append(data['authority']+"/"+data['identifier'])
+
                 self.w_dv_dataset(dv_id,doi)
                     
     def w_dv_dataset(self, dv_id, doi):
@@ -63,7 +76,7 @@ class DataVerseML(object):
             import requests
             import json
             
-            dv_query = self.url+"/api/dataverses/"+dv_id+"/?persistentId=doi:"+doinum+"&key="+self.api_key
+            dv_query = self.url+"/api/datasets/:persistentId/?persistentId=doi:"+doinum+"&key="+self.api_key
             headers = {'X-Dataverse-key': self.api_key}
               
             
@@ -73,7 +86,34 @@ class DataVerseML(object):
             if json_output['status'] != "OK":
                 print("ERROR Occured! Please try again!")
             else:
-                print(json_output)
+                files = json_output['data']['latestVersion']['files']
+                files_out = {}
+                for file in files:
+                    files_out[file['label']] = str(file['dataFile']['id'])
+                self.w_dv_file(dv_id,doinum,files_out)
+                
+                
+    def w_dv_file(self, dv_id, doi, files):
+        print("==============")
+        print("Select File")
+        interact_id_update=interact.options(manual=True,manual_name="Analyze!")
+        
+        @interact_id_update
+        def w_dv_file_update(fileid = files):
+            import requests
+            import json
+            
+            dv_query = self.url+"/api/access/datafile/"+fileid+"/?persistentId=doi:"+doi+"&key="+self.api_key
+            headers = {'X-Dataverse-key': self.api_key}
+              
+            result = requests.get(dv_query,headers=headers) 
+            
+            from io import StringIO
+            
+            mydata = StringIO(result.text)
+            data = pd.read_csv(mydata, sep='\t')
+            
+            self.analyze(data)
     
     def set_url(self,url):
         self.url = url
@@ -86,4 +126,103 @@ class DataVerseML(object):
         
     def get_api_key(self):
         return self.api_key
+    
+    
+    def analyze(self,data):
+        data_head = data.head(25).to_numpy()
+        data_col_names = data.columns.values
+        data_describe = data.describe().round(3).to_html(classes='table table-dark')
+		
+        datalength = len(data.columns)		
+
+        X = data.values[:,0:datalength-1]
+        Y = data.values[:,datalength-1]
         
+        #validation
+        validation_size = 0.20
+        seed = 7
+        scoring = 'accuracy'
+        
+        X_train, X_validation, Y_train, Y_validation = model_selection.train_test_split(X,Y,test_size=validation_size, random_state=seed)
+
+        models = []
+        models.append(('LR', LogisticRegression(solver='liblinear', multi_class='ovr'))) #logistic regression
+        models.append(('LDA', LinearDiscriminantAnalysis())) #LDA
+        models.append(('KNN', KNeighborsClassifier())) #KNearest Neighbor  5
+        models.append(('CART', DecisionTreeClassifier())) #DecisionTree/CART
+        models.append(('NB', GaussianNB())) #Naive Bayes
+        mymodels = {'LR': LogisticRegression(solver='liblinear', multi_class='ovr'), 'LDA': LinearDiscriminantAnalysis(),
+					'KNN': KNeighborsClassifier(), 'CART': DecisionTreeClassifier(), 'NB': GaussianNB()}
+        #models.append(('SVM', SVC(gamma='auto')))
+        # evaluate each model in turn
+        results = []
+        names = []
+        means = []
+        
+        best_model_mean = -1
+        best_model_name = ""
+        for name, model in models:
+            kfold = model_selection.KFold(n_splits=10, random_state=seed)
+            cv_results = model_selection.cross_val_score(model, X_train, Y_train, cv=kfold, scoring=scoring)
+            results.append(cv_results)
+            names.append(name)
+            if best_model_mean < cv_results.mean():
+                best_model_mean = cv_results.mean()
+                best_model_name = name
+                #msg = "%s: %f (%f)" % (name, cv_results.mean(), cv_results.std())
+                #print(msg)
+                
+        import numpy as np     
+        results = np.transpose(results)
+            
+                
+        mymodel = mymodels[best_model_name]
+        mymodel.fit(X_train, Y_train)
+        predictions = mymodel.predict(X_validation)
+        mymodel_accuracy = accuracy_score(Y_validation, predictions)
+        mymodel_confusion = confusion_matrix(Y_validation, predictions)
+        mymodel_report = classification_report(Y_validation, predictions)
+		
+        display(HTML("<h1>Data Shape</h1>"))
+        display(data.shape)
+        display(HTML(data_describe))
+        display(HTML(pd.DataFrame(data_head,columns=data_col_names).to_html(classes='table table-dark')))
+
+        display(HTML("<h2>Machine Learning Algorithms</h2>"))
+        display(HTML(pd.DataFrame(results,columns=names).to_html(classes="table table-dark")))
+
+        display(HTML("<h2>Best Model</h2>"))
+        display(HTML("<p>Best model to use for this data is "+best_model_name+" with CV accuracy of "+str(round(best_model_mean*100,2))+"."))
+        
+        display(HTML("<h3>Model Accuracy</h3>"))
+        display(HTML("<p>Accuracy of the model is "+str(round(mymodel_accuracy*100,2))+"%.</p>"))
+        
+        display(HTML("<strong>Confusion Matrix:</strong>"))
+        display(mymodel_confusion)
+        print(mymodel_report)
+
+class Upload:
+    def __init__(self, verbose=0):
+        if verbose > 0:
+            print("Upload Module Loaded...")
+        try:
+            from dvkey import API_KEY     
+            from dvurl import URL
+            global API_KEY
+            global URL
+            self.api_key = API_KEY
+            self.url = URL
+            self.w_dv_id()
+            
+            
+        except ImportError:
+            self.w_dv_key_url()
+            
+    def w_dv_key_url(self):
+        interact_id_update=interact.options(manual=True,manual_name="Set key and url")
+        
+        @interact_id_update
+        def w_dv_key_url_update(url="",api_key=""):
+            self.url = url
+            self.api_key = api_key
+            self.w_dv_id()
